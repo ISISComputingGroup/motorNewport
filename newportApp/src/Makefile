@@ -4,7 +4,7 @@ include $(TOP)/configure/CONFIG
 #
 # Both the following line, and a line in the *.dbd file,
 # must be uncommented to use diagnostic debugging messages.
-#!USR_CXXFLAGS += -DDEBUG
+USR_CXXFLAGS += -DDEBUG
 
 # The Newport XPS_C8_driver.cpp file uses "char *" when they should use "const char *".
 # Turn off warnings when we call this functions with string constants
