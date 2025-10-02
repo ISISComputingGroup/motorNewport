@@ -224,7 +224,7 @@ static int set_status(int card, int signal)
     nodeptr = motor_info->motor_motion;
     status.All = motor_info->status.All;
 
-    sprintf(outbuff, "%.2dMD", signal + 1);
+    sprintf(outbuff, "%.2dMD?", signal + 1);
     send_mess(card, outbuff, NULL);
     charcnt = recv_mess(card, inbuff, 1);
 
@@ -257,31 +257,38 @@ static int set_status(int card, int signal)
     sprintf(outbuff, READ_POSITION, signal + 1);
     send_mess(card, outbuff, NULL);
     charcnt = recv_mess(card, inbuff, 1);
-
-    motorData = atof(inbuff) / cntrl->drive_resolution[signal];
-
-    if (motorData == motor_info->position)
-    {
-        if (nodeptr != 0)   /* Increment counter only if motor is moving. */
-            motor_info->no_motion_count++;
+    if (charcnt <= 0) {
+        send_mess(card, outbuff, NULL);
+        charcnt = recv_mess(card, inbuff, 1);
     }
-    else
-    {
-        epicsInt32 newposition;
+        
+    if (charcnt > 0) {
 
-        newposition = NINT(motorData);
-        status.Bits.RA_DIRECTION = (newposition >= motor_info->position) ? 1 : 0;
-        motor_info->position = newposition;
-        /* Also set the encoder position, since there is only one command
-         * to query the position and the stage might have an encoder */
-        motor_info->encoder_position = newposition;
-        motor_info->no_motion_count = 0;
+        motorData = atof(inbuff) / cntrl->drive_resolution[signal];
+
+        if (motorData == motor_info->position)
+        {
+            if (nodeptr != 0)   /* Increment counter only if motor is moving. */
+                motor_info->no_motion_count++;
+        }
+        else
+        {
+            epicsInt32 newposition;
+
+            newposition = NINT(motorData);
+            status.Bits.RA_DIRECTION = (newposition >= motor_info->position) ? 1 : 0;
+            motor_info->position = newposition;
+            /* Also set the encoder position, since there is only one command
+             * to query the position and the stage might have an encoder */
+            motor_info->encoder_position = newposition;
+            motor_info->no_motion_count = 0;
+        }
     }
 
     plusdir = (status.Bits.RA_DIRECTION) ? true : false;
 
     /* Get travel limit switch status. */
-    sprintf(outbuff, "%.2dPH", signal + 1);
+    sprintf(outbuff, "PH");
     send_mess(card, outbuff, NULL);
     charcnt = recv_mess(card, inbuff, 1);
     cptr = strchr(inbuff, 'H');
@@ -294,7 +301,7 @@ static int set_status(int card, int signal)
     mstatus = strtol(inbuff, &cptr, 16);
 
     /* Set Travel limit switch status bits. */
-    if (((mstatus >> signal) & 0x01) == false)
+    if (((mstatus >> signal) & 0x01) == 0x01)
         status.Bits.RA_PLUS_LS = 0;
     else
     {
@@ -303,7 +310,7 @@ static int set_status(int card, int signal)
             ls_active = true;
     }
 
-    if (((mstatus >> (signal + 8)) & 0x01) == false)
+    if (((mstatus >> (signal + 8)) & 0x01) == 0x01)
         status.Bits.RA_MINUS_LS = 0;
     else
     {
@@ -333,17 +340,19 @@ static int set_status(int card, int signal)
     status.Bits.EA_HOME     = 0;
 
     /* Get error code. */
-    sprintf(outbuff, "%.2dTE?", signal + 1);
-    send_mess(card, outbuff, NULL);
-    charcnt = recv_mess(card, inbuff, 1);
-    errcode = atoi(inbuff);
-    if (errcode != 0)
-    {
-        status.Bits.RA_PROBLEM = 1;
-        printf("ESP300 controller error = %d.\n", errcode);
-    }
-    else
-        status.Bits.RA_PROBLEM = 0;
+    do {
+        sprintf(outbuff, "TE?");
+        send_mess(card, outbuff, NULL);
+        charcnt = recv_mess(card, inbuff, 1);
+        errcode = atoi(inbuff);
+        if (errcode != 0)
+        {
+            status.Bits.RA_PROBLEM = 1;
+            printf("ESP300 controller error = %d.\n", errcode);
+        }
+        else
+            status.Bits.RA_PROBLEM = 0;
+    } while (errcode != 0 || charcnt == 0);
 
     /* Parse motor velocity? */
     /* NEEDS WORK */
@@ -464,6 +473,7 @@ static int recv_mess(int card, char *com, int flag)
     size_t nread = 0;
     asynStatus status;
     int eomReason;
+    com[0] = '\0';
 
     /* Check that card exists */
     if (!motor_state[card])
@@ -487,6 +497,7 @@ static int recv_mess(int card, char *com, int flag)
         error = strtol(&com[1], NULL, 0);
         if (error >= 35 && error <= 42)
         {
+            printf("retry\n");
             if (flush)
                 status = pasynOctetSyncIO->flush(cntrl->pasynUser);
             status = pasynOctetSyncIO->read(cntrl->pasynUser, com, BUFF_SIZE,
@@ -498,6 +509,7 @@ static int recv_mess(int card, char *com, int flag)
     {
         com[0] = '\0';
         nread = 0;
+        //printf("read error\n");
     }
     else
     {
@@ -658,6 +670,7 @@ errexit:
             send_mess(card_index, "ZU", NULL);
             recv_mess(card_index, buff, 1);
             total_axis = buff[0] >> 4;
+            total_axis = 1;
             if (total_axis > 4)
             {
                 Debug(2, "motor_init(): ZU = %s\n", buff);
