@@ -301,7 +301,11 @@ static int set_status(int card, int signal)
     mstatus = strtol(inbuff, &cptr, 16);
 
     /* Set Travel limit switch status bits. */
-    if (((mstatus >> signal) & 0x01) == 0x01)
+    int limit_level = 0x0;
+    if (getenv("ESP300_LIMIT_LEVEL") != 0) {
+        limit_level = atoi(getenv("ESP300_LIMIT_LEVEL"));
+    }
+    if (((mstatus >> signal) & 0x01) == limit_level)
         status.Bits.RA_PLUS_LS = 0;
     else
     {
@@ -310,7 +314,7 @@ static int set_status(int card, int signal)
             ls_active = true;
     }
 
-    if (((mstatus >> (signal + 8)) & 0x01) == 0x01)
+    if (((mstatus >> (signal + 8)) & 0x01) == limit_level)
         status.Bits.RA_MINUS_LS = 0;
     else
     {
@@ -497,7 +501,6 @@ static int recv_mess(int card, char *com, int flag)
         error = strtol(&com[1], NULL, 0);
         if (error >= 35 && error <= 42)
         {
-            printf("retry\n");
             if (flush)
                 status = pasynOctetSyncIO->flush(cntrl->pasynUser);
             status = pasynOctetSyncIO->read(cntrl->pasynUser, com, BUFF_SIZE,
@@ -653,11 +656,14 @@ static int motor_init()
 
             do
             {
+                if (retry > 0) {
+                    epicsThreadSleep(0.1);
+                }
                 send_mess(card_index, GET_IDENT, NULL);
                 status = recv_mess(card_index, buff, 1);
                 retry++;
                 /* Return value is length of response string */
-            } while (status == 0 && retry < 3);
+            } while (status == 0 && retry < 5);
         }
 
 errexit:
@@ -670,7 +676,9 @@ errexit:
             send_mess(card_index, "ZU", NULL);
             recv_mess(card_index, buff, 1);
             total_axis = buff[0] >> 4;
-            total_axis = 1;
+            if (getenv("ESP300_TOTAL_AXES") != NULL) {
+                total_axis = atol(getenv("ESP300_TOTAL_AXES"));
+            }
             if (total_axis > 4)
             {
                 Debug(2, "motor_init(): ZU = %s\n", buff);
