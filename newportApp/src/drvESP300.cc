@@ -217,6 +217,7 @@ static int set_status(int card, int signal)
     long mstatus;
     double motorData;
     bool power, plusdir, ls_active = false;
+    int limit_level = 0x0;
     msta_field status;
 
     cntrl = (struct MMcontroller *) motor_state[card]->DevicePrivate;
@@ -301,7 +302,6 @@ static int set_status(int card, int signal)
     mstatus = strtol(inbuff, &cptr, 16);
 
     /* Set Travel limit switch status bits. */
-    int limit_level = 0x0;
     if (getenv("ESP300_LIMIT_LEVEL") != 0) {
         limit_level = atoi(getenv("ESP300_LIMIT_LEVEL"));
     }
