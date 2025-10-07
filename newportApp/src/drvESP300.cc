@@ -58,6 +58,9 @@ USAGE...    Motor record driver level support for Newport ESP300/100.
 #include <drvSup.h>
 #include <errlog.h>
 #include <stdlib.h>
+#include <string>
+#include <sstream>
+
 #include "motor.h"
 #include "NewportRegister.h"
 #include "drvMMCom.h"
@@ -144,6 +147,116 @@ struct drvESP300_drvet
 
 extern "C" {epicsExportAddress(drvet, drvESP300);}
 
+std::string getAxisParamString(int card_index, int axis, const char* query)
+{
+    char buff[100];
+    if (axis > 0) {
+        sprintf(buff, "%.2d%s?", axis, query);
+    } else {
+        sprintf(buff, "%s", query);
+    }
+    send_mess(card_index, buff, 0);
+    recv_mess(card_index, buff, 1);
+    return std::string(buff);
+}
+
+double getAxisParamDouble(int card_index, int axis, const char* query)
+{
+    return atof(getAxisParamString(card_index, axis, query).c_str());
+}
+
+std::string printBinary(unsigned long num, unsigned bits)
+{
+    std::ostringstream oss;
+    for(unsigned i = bits - 1; i >= 0; --i)
+    {
+        if ((num & (1u << i)) != 0) {
+            oss << "1";
+        } else {
+            oss << "0";
+        }
+        if (i != 0 && i % 4 == 0) {
+            oss << " ";
+        }
+    }
+    return oss.str();
+}
+
+static const char* motor_types[] = { "undefined", "DC servo", "step motor",
+             "commutated step motor", "commutated brushless DC servo motor" };
+
+static void reportCard(int card_index, int total_axis)
+{
+    printf("Last error = %s\n", getAxisParamString(card_index, -1, "TB?").c_str());
+    for (int motor_index = 0; motor_index < total_axis; motor_index++)
+    {
+        int axis = motor_index + 1;
+        printf("*** Axis %d ***\n", axis); 
+        printf("Acceleration = %f\n", getAxisParamDouble(card_index, axis, "AC"));
+        printf("DIO inhibit = %s\n", (getAxisParamDouble(card_index, axis, "BL") != 0.0 ? "yes" : "no"));
+        printf("Closed loop update interval = %f\n", getAxisParamDouble(card_index, axis, "CL"));
+        printf("Desired position = %f\n", getAxisParamDouble(card_index, axis, "DP"));
+        printf("Desired velocity = %f\n", getAxisParamDouble(card_index, axis, "DV"));
+        printf("Actual velocity = %f\n", getAxisParamDouble(card_index, axis, "TV"));
+        printf("Base velocity = %f\n", getAxisParamDouble(card_index, axis, "VB"));
+        printf("Max velocity = %f\n", getAxisParamDouble(card_index, axis, "VU"));
+        printf("Velocity = %f\n", getAxisParamDouble(card_index, axis, "VA"));
+        printf("Actual position = %f\n", getAxisParamDouble(card_index, axis, "TP"));
+        printf("Max following error = %f\n", getAxisParamDouble(card_index, axis, "FE"));
+        printf("Encoder fullstep resolution = %f\n", getAxisParamDouble(card_index, axis, "FR"));
+        printf("Encoder resolution = %f\n", getAxisParamDouble(card_index, axis, "SU"));
+        printf("Stage model = %s\n", getAxisParamString(card_index, axis, "ID").c_str());
+        printf("Motion done = %s\n", (getAxisParamDouble(card_index, axis, "MD") != 0.0 ? "yes" : "no"));
+        printf("Motor power = %s\n", (getAxisParamDouble(card_index, axis, "MO") != 0.0 ? "on" : "off"));
+
+        // KP KI KD KS AF VF for servo
+        printf("Motor Voltage = %f\n", getAxisParamDouble(card_index, axis, "QV"));
+        printf("Motor Current = %f\n", getAxisParamDouble(card_index, axis, "QI"));
+        printf("Motor microstep factor = %f\n", getAxisParamDouble(card_index, axis, "QS"));
+        printf("Motor tachometer gain = %f\n", getAxisParamDouble(card_index, axis, "QT"));
+        printf("Left software travel limit = %f\n", getAxisParamDouble(card_index, axis, "SL"));
+        printf("Right software travel limit = %f\n", getAxisParamDouble(card_index, axis, "SR"));
+
+        int motor_type = getAxisParamDouble(card_index, axis, "QM");
+        printf("Motor type = %s\n", motor_types[motor_type]);
+        
+        unsigned long za_config = strtol(getAxisParamString(card_index, axis, "ZA").c_str(), NULL, 16);
+        printf("Amplifier configuration ZA = %s\n", printBinary(za_config, 12).c_str());
+
+        unsigned long zb_config = strtol(getAxisParamString(card_index, axis, "ZB").c_str(), NULL, 16);
+        printf("Feedback configuration ZB = %s\n", printBinary(zb_config, 12).c_str()); 
+        printf("    Use encoder feedback for stepper positioning: %s\n", (zb_config & (1 << 8)) != 0 ? "yes" : "no");
+        printf("    closed loop positioning: %s\n", (zb_config & (1 << 9)) != 0 ? "enabled" : "disabled");
+        printf("    feedback error checking: %s\n", (zb_config & (1 << 0)) != 0 ? "enabled" : "disabled");
+        
+        unsigned long zf_config = strtol(getAxisParamString(card_index, axis, "ZF").c_str(), NULL, 16);
+        printf("Following error configuration ZF = %s\n", printBinary(zf_config, 4).c_str());
+
+        unsigned long zh_config = strtol(getAxisParamString(card_index, axis, "ZH").c_str(), NULL, 16);
+        printf("Hardware limit configuration ZH = %s\n", printBinary(zh_config, 8).c_str());
+        printf("    hardware travel limit error checking: %s\n", (zh_config & (1 << 0)) != 0 ? "enabled" : "disabled");
+        printf("    disable motor on hardware travel limit event: %s\n", (zh_config & (1 << 1)) != 0 ? "yes" : "no");
+        printf("    abort motion on hardware travel limit event: %s\n", (zh_config & (1 << 2)) != 0 ? "yes" : "no");
+
+        unsigned long zs_config = strtol(getAxisParamString(card_index, axis, "ZS").c_str(), NULL, 16);
+        printf("Software limit configuration ZS = %s\n", printBinary(zs_config, 4).c_str());
+        printf("    software travel limit error checking: %s\n", (zs_config & (1 << 0)) != 0 ? "enabled" : "disabled");
+        printf("    disable motor on software travel limit event: %s\n", (zs_config & (1 << 1)) != 0 ? "yes" : "no");
+        printf("    abort motion on software travel limit event: %s\n", (zs_config & (1 << 2)) != 0 ? "yes" : "no");
+
+        unsigned long zu_config = strtol(getAxisParamString(card_index, -1, "ZU").c_str(), NULL, 16);
+        printf("ESP System configuration configuration ZU = %s\n", printBinary(zu_config, 16).c_str());
+
+        unsigned long zz_config = strtol(getAxisParamString(card_index, -1, "ZZ?").c_str(), NULL, 16);
+        printf("System configuration configuration ZZ = %s\n", printBinary(zz_config, 16).c_str());
+
+        std::string ph_status = getAxisParamString(card_index, -1, "PH");
+        unsigned long ph_reg1 = strtol(ph_status.c_str(), NULL, 16);
+        printf("Hardware status PH register #1 = %s\n", printBinary(ph_reg1, 32).c_str());
+
+    }
+}
+
 static struct thread_args targs = {SCAN_RATE, &ESP300_access, 0.0};
 
 /*********************************************************
@@ -171,6 +284,7 @@ static long report(int level)
                 printf("    ESP300 controller %d port=%s, address=%d, id: %s \n",
                        card, cntrl->asyn_port, cntrl->asyn_address,
                        brdptr->ident);
+                reportCard(card, brdptr->total_axis);
             }
         }
     }
@@ -501,6 +615,8 @@ static int recv_mess(int card, char *com, int flag)
         error = strtol(&com[1], NULL, 0);
         if (error >= 35 && error <= 42)
         {
+            Debug(2, "recv_mess(): message = \"%s\" re-reading ...\n", com);
+            nread = 0;
             if (flush)
                 status = pasynOctetSyncIO->flush(cntrl->pasynUser);
             status = pasynOctetSyncIO->read(cntrl->pasynUser, com, BUFF_SIZE,
@@ -510,9 +626,9 @@ static int recv_mess(int card, char *com, int flag)
 
     if ((status != asynSuccess) || (nread <= 0) || (com[nread - 1] != '\r'))
     {
+        Debug(2, "recv_mess(): error status=%d message=\"%s\"\n", status, (nread > 0 ? com : ""));
         com[0] = '\0';
         nread = 0;
-        //printf("read error\n");
     }
     else
     {
@@ -522,9 +638,9 @@ static int recv_mess(int card, char *com, int flag)
          */
         nread--;
         com[nread] = '\0';  /* Strip trailing CR. */
+        Debug(2, "recv_mess(): message = \"%s\"\n", com);
     }
     
-    Debug(2, "recv_mess(): message = \"%s\"\n", com);
     return((int)nread);
 }
 
