@@ -195,6 +195,8 @@ static void reportCard(int card_index, int total_axis)
         printf("Acceleration = %f\n", getAxisParamDouble(card_index, axis, "AC"));
         printf("DIO inhibit = %s\n", (getAxisParamDouble(card_index, axis, "BL") != 0.0 ? "yes" : "no"));
         printf("Closed loop update interval = %f\n", getAxisParamDouble(card_index, axis, "CL"));
+        printf("Linear compensation = %f\n", getAxisParamDouble(card_index, axis, "CO"));
+        printf("Position deadband = %f\n", getAxisParamDouble(card_index, axis, "DB"));
         printf("Desired position = %f\n", getAxisParamDouble(card_index, axis, "DP"));
         printf("Desired velocity = %f\n", getAxisParamDouble(card_index, axis, "DV"));
         printf("Actual velocity = %f\n", getAxisParamDouble(card_index, axis, "TV"));
@@ -222,6 +224,7 @@ static void reportCard(int card_index, int total_axis)
         
         unsigned long za_config = strtol(getAxisParamString(card_index, axis, "ZA").c_str(), NULL, 16);
         printf("Amplifier configuration ZA = %s\n", printBinary(za_config, 12).c_str());
+        printf("    stepper motor winding: %s\n", (za_config & (1 << 11)) != 0 ? "half" : "full");
 
         unsigned long zb_config = strtol(getAxisParamString(card_index, axis, "ZB").c_str(), NULL, 16);
         printf("Feedback configuration ZB = %s\n", printBinary(zb_config, 12).c_str()); 
@@ -231,7 +234,10 @@ static void reportCard(int card_index, int total_axis)
         
         unsigned long zf_config = strtol(getAxisParamString(card_index, axis, "ZF").c_str(), NULL, 16);
         printf("Following error configuration ZF = %s\n", printBinary(zf_config, 4).c_str());
-
+        printf("    following error checking: %s\n", (zf_config & (1 << 0)) != 0 ? "enabled" : "disabled");
+        printf("    disable motor on following event: %s\n", (zf_config & (1 << 1)) != 0 ? "yes" : "no");
+        printf("    abort motion on following event: %s\n", (zf_config & (1 << 2)) != 0 ? "yes" : "no");
+        
         unsigned long zh_config = strtol(getAxisParamString(card_index, axis, "ZH").c_str(), NULL, 16);
         printf("Hardware limit configuration ZH = %s\n", printBinary(zh_config, 8).c_str());
         printf("    hardware travel limit error checking: %s\n", (zh_config & (1 << 0)) != 0 ? "enabled" : "disabled");
@@ -253,7 +259,6 @@ static void reportCard(int card_index, int total_axis)
         std::string ph_status = getAxisParamString(card_index, -1, "PH");
         unsigned long ph_reg1 = strtol(ph_status.c_str(), NULL, 16);
         printf("Hardware status PH register #1 = %s\n", printBinary(ph_reg1, 32).c_str());
-
     }
 }
 
