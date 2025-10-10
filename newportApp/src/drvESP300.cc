@@ -147,7 +147,7 @@ struct drvESP300_drvet
 
 extern "C" {epicsExportAddress(drvet, drvESP300);}
 
-std::string getAxisParamString(int card_index, int axis, const char* query)
+static std::string getAxisParamString(int card_index, int axis, const char* query)
 {
     char buff[100];
     if (axis > 0) {
@@ -160,12 +160,12 @@ std::string getAxisParamString(int card_index, int axis, const char* query)
     return std::string(buff);
 }
 
-double getAxisParamDouble(int card_index, int axis, const char* query)
+static double getAxisParamDouble(int card_index, int axis, const char* query)
 {
     return atof(getAxisParamString(card_index, axis, query).c_str());
 }
 
-std::string printBinary(unsigned long num, unsigned bits)
+static std::string printBinary(unsigned long num, unsigned bits)
 {
     std::ostringstream oss;
     for(unsigned i = bits - 1; i >= 0; --i)
@@ -182,12 +182,31 @@ std::string printBinary(unsigned long num, unsigned bits)
     return oss.str();
 }
 
+static std::string getHWLimit(unsigned long ph_reg1, int bit, int active_value)
+{
+    std::ostringstream oss;
+    if ((ph_reg1 & (1 << bit)) == active_value) {
+        oss << "+ ";
+    }
+    if ((ph_reg1 & (1 << (8 + bit))) == active_value) {
+        oss << "- ";
+    }
+    return oss.str();
+}
+
 static const char* motor_types[] = { "undefined", "DC servo", "step motor",
              "commutated step motor", "commutated brushless DC servo motor" };
 
 static void reportCard(int card_index, int total_axis)
 {
     printf("Last error = %s\n", getAxisParamString(card_index, -1, "TB?").c_str());
+    std::string ph_status = getAxisParamString(card_index, -1, "PH");
+    unsigned long ph_reg1 = strtol(ph_status.c_str(), NULL, 16);
+    printf("Hardware status PH register #1 = %s\n", printBinary(ph_reg1, 32).c_str());
+    unsigned long zu_config = strtol(getAxisParamString(card_index, -1, "ZU").c_str(), NULL, 16);
+    printf("ESP System configuration configuration ZU = %s\n", printBinary(zu_config, 16).c_str());
+    unsigned long zz_config = strtol(getAxisParamString(card_index, -1, "ZZ?").c_str(), NULL, 16);
+    printf("System configuration configuration ZZ = %s\n", printBinary(zz_config, 16).c_str());
     for (int motor_index = 0; motor_index < total_axis; motor_index++)
     {
         int axis = motor_index + 1;
@@ -229,7 +248,7 @@ static void reportCard(int card_index, int total_axis)
         unsigned long zb_config = strtol(getAxisParamString(card_index, axis, "ZB").c_str(), NULL, 16);
         printf("Feedback configuration ZB = %s\n", printBinary(zb_config, 12).c_str()); 
         printf("    Use encoder feedback for stepper positioning: %s\n", (zb_config & (1 << 8)) != 0 ? "yes" : "no");
-        printf("    closed loop positioning: %s\n", (zb_config & (1 << 9)) != 0 ? "enabled" : "disabled");
+        printf("    closed loop stepper positioning: %s\n", (zb_config & (1 << 9)) != 0 ? "enabled" : "disabled");
         printf("    feedback error checking: %s\n", (zb_config & (1 << 0)) != 0 ? "enabled" : "disabled");
         
         unsigned long zf_config = strtol(getAxisParamString(card_index, axis, "ZF").c_str(), NULL, 16);
@@ -243,22 +262,16 @@ static void reportCard(int card_index, int total_axis)
         printf("    hardware travel limit error checking: %s\n", (zh_config & (1 << 0)) != 0 ? "enabled" : "disabled");
         printf("    disable motor on hardware travel limit event: %s\n", (zh_config & (1 << 1)) != 0 ? "yes" : "no");
         printf("    abort motion on hardware travel limit event: %s\n", (zh_config & (1 << 2)) != 0 ? "yes" : "no");
+        int hw_limit_active_value = ((zh_config & (1 << 5)) != 0 ? 1 : 0);
+        printf("    hardware travel limit input is active %s\n", (hw_limit_active_value != 0 ? "HIGH" : "LOW"));
+
+        printf("HW limit status = %s\n", getHWLimit(ph_reg1, motor_index, hw_limit_active_value).c_str());
 
         unsigned long zs_config = strtol(getAxisParamString(card_index, axis, "ZS").c_str(), NULL, 16);
         printf("Software limit configuration ZS = %s\n", printBinary(zs_config, 4).c_str());
         printf("    software travel limit error checking: %s\n", (zs_config & (1 << 0)) != 0 ? "enabled" : "disabled");
         printf("    disable motor on software travel limit event: %s\n", (zs_config & (1 << 1)) != 0 ? "yes" : "no");
         printf("    abort motion on software travel limit event: %s\n", (zs_config & (1 << 2)) != 0 ? "yes" : "no");
-
-        unsigned long zu_config = strtol(getAxisParamString(card_index, -1, "ZU").c_str(), NULL, 16);
-        printf("ESP System configuration configuration ZU = %s\n", printBinary(zu_config, 16).c_str());
-
-        unsigned long zz_config = strtol(getAxisParamString(card_index, -1, "ZZ?").c_str(), NULL, 16);
-        printf("System configuration configuration ZZ = %s\n", printBinary(zz_config, 16).c_str());
-
-        std::string ph_status = getAxisParamString(card_index, -1, "PH");
-        unsigned long ph_reg1 = strtol(ph_status.c_str(), NULL, 16);
-        printf("Hardware status PH register #1 = %s\n", printBinary(ph_reg1, 32).c_str());
     }
 }
 
@@ -333,9 +346,9 @@ static int set_status(int card, int signal)
     char *cptr, *tok_save;
     char inbuff[BUFF_SIZE], outbuff[BUFF_SIZE];
     int rtn_state, charcnt, errcode;
-    long mstatus;
+    long mstatus, hstatus;
     double motorData;
-    bool power, plusdir, ls_active = false;
+    bool power, plusdir, ls_active = false, problem = false;
     int limit_level = 0x0;
     msta_field status;
 
@@ -420,11 +433,24 @@ static int set_status(int card, int signal)
     }
     mstatus = strtol(inbuff, &cptr, 16);
 
+    sprintf(outbuff, "%.2dZH?", signal + 1);
+    send_mess(card, outbuff, NULL);
+    charcnt = recv_mess(card, inbuff, 1);
+    cptr = strchr(inbuff, 'H');
+    if (cptr == NULL)
+    {
+        Debug(2, "set_status(): ZH error = %s\n", inbuff);
+        rtn_state = 1;
+        goto exit;
+    }
+    hstatus = strtol(inbuff, &cptr, 16);
+    limit_level = (hstatus & (1 << 5));
+
     /* Set Travel limit switch status bits. */
     if (getenv("ESP300_LIMIT_LEVEL") != 0) {
         limit_level = atoi(getenv("ESP300_LIMIT_LEVEL"));
     }
-    if (((mstatus >> signal) & 0x01) == limit_level)
+    if (((mstatus >> signal) & 0x01) != limit_level)
         status.Bits.RA_PLUS_LS = 0;
     else
     {
@@ -433,7 +459,7 @@ static int set_status(int card, int signal)
             ls_active = true;
     }
 
-    if (((mstatus >> (signal + 8)) & 0x01) == limit_level)
+    if (((mstatus >> (signal + 8)) & 0x01) != limit_level)
         status.Bits.RA_MINUS_LS = 0;
     else
     {
@@ -470,13 +496,11 @@ static int set_status(int card, int signal)
         errcode = atoi(inbuff);
         if (errcode != 0)
         {
-            status.Bits.RA_PROBLEM = 1;
+            problem = true;
             printf("ESP300 controller error = %d.\n", errcode);
         }
-        else
-            status.Bits.RA_PROBLEM = 0;
     } while (errcode != 0 || charcnt == 0);
-
+    status.Bits.RA_PROBLEM = (problem ? 1 : 0);
     /* Parse motor velocity? */
     /* NEEDS WORK */
 
