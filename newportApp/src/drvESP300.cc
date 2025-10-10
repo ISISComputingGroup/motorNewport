@@ -655,7 +655,7 @@ static int recv_mess(int card, char *com, int flag)
 
     if ((status != asynSuccess) || (nread <= 0) || (com[nread - 1] != '\r'))
     {
-        Debug(2, "recv_mess(): error status=%d message=\"%s\"\n", status, (nread > 0 ? com : ""));
+        Debug(2, "recv_mess(): error status=%d message=\"%s\"\n", (int)status, (nread > 0 ? com : ""));
         com[0] = '\0';
         nread = 0;
     }
