@@ -147,6 +147,9 @@ struct drvESP300_drvet
 
 extern "C" {epicsExportAddress(drvet, drvESP300);}
 
+// a lock to stop a poll then we are doing a report 
+static epicsMutex statusLock;
+
 static std::string getAxisParamString(int card_index, int axis, const char* query)
 {
     char buff[100];
@@ -165,10 +168,10 @@ static double getAxisParamDouble(int card_index, int axis, const char* query)
     return atof(getAxisParamString(card_index, axis, query).c_str());
 }
 
-static std::string printBinary(unsigned long num, unsigned bits)
+static std::string printBinary(unsigned long num, int bits)
 {
     std::ostringstream oss;
-    for(unsigned i = bits - 1; i >= 0; --i)
+    for(int i = bits - 1; i >= 0; --i)
     {
         if ((num & (1u << i)) != 0) {
             oss << "1";
@@ -283,6 +286,7 @@ static struct thread_args targs = {SCAN_RATE, &ESP300_access, 0.0};
 static long report(int level)
 {
     int card;
+    epicsGuard<epicsMutex> _lock(statusLock);
 
     if (ESP300_num_cards <=0)
         printf("    No ESP300 controllers configured.\n");
@@ -339,6 +343,7 @@ static void query_done(int card, int axis, struct mess_node *nodeptr)
 
 static int set_status(int card, int signal)
 {
+    epicsGuard<epicsMutex> _lock(statusLock);
     struct MMcontroller *cntrl;
     struct mess_node *nodeptr;
     register struct mess_info *motor_info;
